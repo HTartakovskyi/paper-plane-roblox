@@ -1,0 +1,11 @@
+# Roblox Studio binary places
+Backup/
+*.rbxl
+*.rbxlx
+
+# Rojo generated/build files
+sourcemap.json
+
+# OS / editor
+.DS_Store
+Thumbs.db
