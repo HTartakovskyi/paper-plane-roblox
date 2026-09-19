@@ -1,0 +1,19 @@
+{
+  "name": "PaperPlane-FTUE-Analytics-Test",
+  "tree": {
+    "$className": "DataModel",
+    "$ignoreUnknownInstances": true,
+    "ServerScriptService": {
+      "$className": "ServerScriptService",
+      "$ignoreUnknownInstances": true,
+      "AnalyticsService": {
+        "$path": "src/ServerScriptService/AnalyticsService.luau",
+        "$ignoreUnknownInstances": true
+      },
+      "PlayerDataService": {
+        "$path": "src/ServerScriptService/PlayerDataService.luau",
+        "$ignoreUnknownInstances": true
+      }
+    }
+  }
+}

@@ -69,6 +69,9 @@ local RobloxAnalyticsService =
 
 local AnalyticsService = {}
 
+local PlayerDataService = require(script.Parent:WaitForChild("PlayerDataService"))
+local HttpService = game:GetService("HttpService")
+
 
 -- =========================================================
 -- LEVEL CONFIG
@@ -162,6 +165,8 @@ local saveAllowedPlayers = {}
 local dirtyPlayers = {}
 
 local loadSignals = {}
+
+local ftueStartScheduled = {}
 
 local shuttingDown =
 	false
@@ -649,6 +654,62 @@ end
 -- NORMALIZE LOADED DATA
 -- =========================================================
 
+-- Missing FTUE data means no cohort, not a newly started tutorial.
+local function normalizeFTUE(source)
+
+	if type(source) ~= "table" or source.Version ~= 1
+		or type(source.StartedAt) ~= "number"
+		or source.StartedAt ~= source.StartedAt
+		or source.StartedAt <= 0 or source.StartedAt == math.huge
+	then
+		return nil
+	end
+
+	local result = {
+		Version = 1,
+		StartedAt = source.StartedAt,
+		-- Unset until a later implementation records the first launch.
+		FirstLaunchAt = nil,
+		TimeToFirstLaunchSeconds = nil,
+		Milestones = {},
+		DispatchClaims = {},
+	}
+
+	if type(source.Milestones) ~= "table" or type(source.DispatchClaims) ~= "table" then
+		return nil
+	end
+
+	for _, field in ipairs({ "FirstLaunchAt", "TimeToFirstLaunchSeconds" }) do
+		local value = source[field]
+		if type(value) == "number" and value == value
+			and value >= 0 and value < math.huge
+		then
+			result[field] = value
+		end
+	end
+
+	if type(source.Milestones) == "table" then
+		for name, reached in pairs(source.Milestones) do
+			if type(name) == "string" and reached == true then
+				result.Milestones[name] = true
+			end
+		end
+	end
+
+	if type(source.DispatchClaims) == "table" then
+		for name, claim in pairs(source.DispatchClaims) do
+			if type(name) ~= "string" or type(claim) ~= "string" or claim == "" then
+				-- Dropping an unrecognized claim could authorize a duplicate send.
+				return nil
+			end
+			result.DispatchClaims[name] = claim
+		end
+	end
+
+	return result
+end
+
+
 local function normalizeLoadedData(
 	savedData
 )
@@ -665,6 +726,8 @@ local function normalizeLoadedData(
 
 	data.Version =
 		1
+
+	data.FTUE = normalizeFTUE(savedData.FTUE)
 
 
 	if type(savedData.FirstSeenAt)
@@ -834,6 +897,8 @@ local function createStorageData(
 )
 
 	return {
+
+		FTUE = normalizeFTUE(data.FTUE),
 
 		Version =
 			1,
@@ -1173,6 +1238,108 @@ end
 -- =========================================================
 -- GET DATA
 -- =========================================================
+
+-- Claims are committed before dispatch: no retry of an uncertain send.
+-- Only this path writes FTUE storage; ordinary saves preserve it verbatim.
+local function registerFTUEMilestone(player, milestone, value, metadata)
+
+	local function diagnostic(decision)
+		if RunService:IsStudio() then
+			print("FTUE analytics:", milestone, "value", value, "decision", decision)
+		end
+	end
+
+	local data = AnalyticsService.InitializePlayer(player)
+	if not data or not saveAllowedPlayers[player] or player.Parent ~= Players then
+		diagnostic("SKIPPED_STORAGE_UNAVAILABLE_OR_PLAYER_LEFT")
+		return
+	end
+
+	local claimId = HttpService:GenerateGUID(false)
+	local success, stored = pcall(function()
+		return analyticsDataStore:UpdateAsync(getPlayerKey(player), function(previous)
+			if player.Parent ~= Players then
+				return nil
+			end
+
+			-- Never replace malformed storage with a default profile.
+			if previous ~= nil and type(previous) ~= "table" then
+				return nil
+			end
+
+			local record = previous and deepCopy(previous) or createStorageData(data)
+			local ftue = normalizeFTUE(record.FTUE)
+			if record.FTUE ~= nil and not ftue then
+				return nil
+			end
+
+			if not ftue then
+				if not metadata or not metadata.IsNewProfile then
+					return nil
+				end
+				ftue = {
+					Version = 1,
+					StartedAt = metadata.InitializedAt,
+					Milestones = {},
+					DispatchClaims = {},
+				}
+			end
+
+			if ftue.DispatchClaims[milestone] then
+				return record
+			end
+
+			ftue.Milestones[milestone] = true
+			ftue.DispatchClaims[milestone] = claimId
+			record.FTUE = ftue
+			return record
+		end)
+	end)
+
+	if not success then
+		diagnostic("SKIPPED_STORAGE_ERROR")
+		warn("AnalyticsService: FTUE claim failed; event not dispatched")
+		return
+	end
+
+	local ftue = type(stored) == "table" and normalizeFTUE(stored.FTUE) or nil
+	if not ftue then
+		diagnostic("SKIPPED_NO_VALID_COHORT")
+		return
+	end
+
+	if analyticsData[player] == data then
+		data.FTUE = ftue
+	end
+
+	if ftue.DispatchClaims[milestone] ~= claimId then
+		diagnostic("DEDUPED")
+		return
+	end
+
+	diagnostic("CLAIM_GRANTED")
+	logRobloxCustomEvent(player, milestone, value, {
+		[CUSTOM_FIELD_1] = "FTUEVersion:1",
+	})
+end
+
+
+local function scheduleFTUEStart(player)
+
+	local metadata = PlayerDataService.GetLoadMetadata(player)
+	if not metadata or not metadata.IsNewProfile or ftueStartScheduled[player] then
+		return
+	end
+
+	ftueStartScheduled[player] = true
+	task.defer(function()
+		local success = pcall(registerFTUEMilestone, player, "FTUE_Start", 1, metadata)
+		if not success then
+			warn("AnalyticsService: FTUE initialization failed; gameplay unaffected")
+		end
+	end)
+end
+
 
 local function getData(
 	player
@@ -1774,10 +1941,14 @@ function AnalyticsService.SavePlayer(
 
 					analyticsDataStore:UpdateAsync(
 						key,
-						function()
+						function(previous)
+
+							-- A snapshot captured before a claim must never erase it.
+							local merged = deepCopy(storageData)
+							merged.FTUE = type(previous) == "table" and deepCopy(previous.FTUE) or nil
 
 							return
-							storageData
+								merged
 						end
 					)
 				end
@@ -1832,6 +2003,8 @@ local function removePlayer(
 	player
 )
 
+	ftueStartScheduled[player] = nil
+
 	analyticsData[player] =
 		nil
 
@@ -1861,6 +2034,14 @@ end
 -- =========================================================
 -- PLAYER LIFECYCLE
 -- =========================================================
+
+PlayerDataService.DataReady:Connect(scheduleFTUEStart)
+
+for _, player in ipairs(Players:GetPlayers()) do
+	-- Also handles DataReady firing before this module was required.
+	scheduleFTUEStart(player)
+end
+
 
 Players.PlayerAdded:Connect(
 	function(player)

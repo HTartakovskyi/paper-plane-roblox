@@ -206,6 +206,9 @@ local saveAllowedPlayers = {}
 
 local loadSignals = {}
 
+-- Server-only load facts; never included in saved gameplay data.
+local loadMetadata = {}
+
 local shuttingDown =
 	false
 
@@ -1119,6 +1122,7 @@ local function loadPlayerData(
 
 				return
 					createDefaultData(),
+					true,
 					true
 			end
 
@@ -1247,7 +1251,8 @@ function PlayerDataService.InitializePlayer(
 
 
 	local data,
-		loadSucceeded =
+		loadSucceeded,
+		isNewProfile =
 		loadPlayerData(
 			player
 		)
@@ -1333,6 +1338,11 @@ function PlayerDataService.InitializePlayer(
 	playerData[player] =
 		data
 
+	loadMetadata[player] = {
+		IsNewProfile = isNewProfile == true,
+		InitializedAt = DateTime.now().UnixTimestampMillis / 1000,
+	}
+
 
 	loadedPlayers[player] =
 		true
@@ -1383,6 +1393,13 @@ end
 -- =========================================================
 -- IS LOADED
 -- =========================================================
+
+function PlayerDataService.GetLoadMetadata(player)
+
+	local metadata = loadMetadata[player]
+	return metadata and table.clone(metadata) or nil
+end
+
 
 function PlayerDataService.IsLoaded(
 	player
@@ -1608,6 +1625,8 @@ end
 function PlayerDataService.RemovePlayer(
 	player
 )
+
+	loadMetadata[player] = nil
 
 	playerData[player] =
 		nil
