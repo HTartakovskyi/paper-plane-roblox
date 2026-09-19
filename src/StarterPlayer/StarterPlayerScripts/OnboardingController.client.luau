@@ -14,7 +14,10 @@
 -- OnboardingStage = 2
 --   HUB introduction completed
 --
--- FLOW:
+-- LEGACY FLOW:
+-- Stage 0 now uses runLaunchFirstTutorial (LAUNCH, then retry help).
+-- Sessions that enter Stage 0 finish with a new successful result.
+-- Other Stage 1/2 players retain the legacy presentation below.
 --
 -- 1. START ZONE
 --    NEXT available.
@@ -56,6 +59,10 @@ local TweenService =
 	game:GetService("TweenService")
 
 
+local RunService =
+	game:GetService("RunService")
+
+
 local player =
 	Players.LocalPlayer
 
@@ -63,6 +70,11 @@ local player =
 -- =========================================================
 -- CONFIG
 -- =========================================================
+
+-- Temporary Studio-only FTUE test switch. Overrides client presentation
+-- only; never resets or saves player progress. Ignored in published games.
+local FORCE_FTUE_TEST_IN_STUDIO = false
+
 
 local PULSE_TIME =
 	0.75
@@ -284,6 +296,16 @@ local highlightRevision =
 
 local presentationRevision =
 	0
+
+
+local earlyLaunchPending = false
+local earlyFlightEnded = false
+local earlyHelpDismissed = false
+local earlyHelpShown = false
+local earlyResultFrame = nil
+local launchFirstSessionActive = false
+local newSuccessfulResult = false
+local celebrationShown = false
 
 
 -- =========================================================
@@ -1953,6 +1975,114 @@ end
 -- APPLY SERVER SNAPSHOT
 -- =========================================================
 
+local function showMissionCelebration()
+
+	if not launchFirstSessionActive or celebrationShown or not newSuccessfulResult then
+		return
+	end
+
+	local nextButton = earlyResultFrame and earlyResultFrame:FindFirstChild("NextLevelButton")
+	if not earlyResultFrame or not earlyResultFrame.Visible
+		or not nextButton or not nextButton:IsA("GuiButton") or not nextButton.Visible
+	then
+		return
+	end
+
+	-- ResultUI.Show sets this button visible only for Success + HasNextMission.
+	-- Invalidate the early loop before taking ownership of its panel/highlight.
+	celebrationShown = true
+	presentationRevision += 1
+	baseTutorialRunning = false
+	currentPresentationStep = "MISSION_CELEBRATION"
+	showMessage("NICE THROW!", "MISSION COMPLETE", false)
+	messageFrame.Size = UDim2.fromOffset(MESSAGE_FRAME_WIDTH, 100)
+	highlightGuiObject(nextButton)
+end
+
+
+local function showFirstMissHelp()
+
+	if not launchFirstSessionActive or earlyHelpShown or earlyHelpDismissed
+		or not earlyFlightEnded or earlyLaunchPending
+		or not earlyResultFrame or not earlyResultFrame.Visible
+	then
+		return
+	end
+
+	-- ResultUI.Show assigns TRY AGAIN only to an unsuccessful result,
+	-- and REPLAY to success, before making ResultFrame visible.
+	local retryButton = earlyResultFrame:FindFirstChild("TryAgainButton")
+	if not retryButton or not retryButton:IsA("TextButton")
+		or not retryButton.Visible or retryButton.Text ~= "TRY AGAIN"
+	then
+		return
+	end
+
+	earlyHelpShown = true
+	presentationRevision += 1
+	baseTutorialRunning = false
+	clearExistingHighlights()
+	currentPresentationStep = "RETRY_HINT"
+	showMessage(
+		"TRY ANOTHER THROW",
+		"ANGLE CHANGES THE PATH\nSPEED CHANGES HOW FAR YOU FLY",
+		false
+	)
+	messageFrame.Size = UDim2.fromOffset(MESSAGE_FRAME_WIDTH, 100)
+end
+
+
+local function runLaunchFirstTutorial()
+
+	if earlyFlightEnded or celebrationShown or baseTutorialRunning or not serverSnapshot or serverSnapshot.Stage ~= 0 then
+		return
+	end
+
+	baseTutorialRunning = true
+	presentationRevision += 1
+	local myRevision = presentationRevision
+
+	-- Keep waiting for late UI; every wake checks both stage and token.
+	while myRevision == presentationRevision
+		and serverSnapshot and serverSnapshot.Stage == 0
+	do
+		local flightFrame = FlightUIController.GetFlightFrame()
+		local launchButton = FlightUIController.GetLaunchButton()
+		local ready = FlightUIController.IsInitialized() and flightFrame and launchButton
+		local canShow = ready and not earlyLaunchPending and not earlyFlightEnded
+			and flightFrame.Visible
+
+		if canShow then
+			local step = "LAUNCH_FIRST"
+
+			if currentPresentationStep ~= step then
+				clearExistingHighlights()
+				currentPresentationStep = step
+
+				showMessage("LAUNCH YOUR PLANE", "", false)
+				highlightGuiObject(launchButton)
+
+				messageFrame.Size = UDim2.fromOffset(
+					MESSAGE_FRAME_WIDTH,
+					48
+				)
+			end
+		elseif currentPresentationStep then
+			clearExistingHighlights()
+			hideMessage()
+			currentPresentationStep = nil
+		end
+
+		task.wait(WAIT_INTERVAL)
+	end
+
+	-- A newer presentation owns the UI and running flag after cancellation.
+	if myRevision == presentationRevision then
+		baseTutorialRunning = false
+	end
+end
+
+
 local function applyServerSnapshot(
 	newSnapshot,
 	fromServerUpdate
@@ -1960,6 +2090,20 @@ local function applyServerSnapshot(
 
 	if not newSnapshot then
 
+		return
+	end
+
+
+	if FORCE_FTUE_TEST_IN_STUDIO and RunService:IsStudio() then
+		newSnapshot = table.clone(newSnapshot)
+		newSnapshot.Stage = 0
+		newSnapshot.Completed = false
+		newSnapshot.HubIntroAvailable = false
+	end
+
+
+	-- A delayed initial response must not restore Stage 0 after Stage 1/2.
+	if serverSnapshot and newSnapshot.Stage < serverSnapshot.Stage then
 		return
 	end
 
@@ -1978,6 +2122,29 @@ local function applyServerSnapshot(
 
 	serverSnapshot =
 		newSnapshot
+
+
+	if newSnapshot.Stage == 0 then
+		launchFirstSessionActive = true
+	end
+
+	if launchFirstSessionActive then
+		showMissionCelebration()
+		showFirstMissHelp()
+		if celebrationShown or currentPresentationStep == "RETRY_HINT" then
+			return
+		end
+		if newSnapshot.Stage >= 1 then
+			-- Server success can precede playback. Wait for the new result UI,
+			-- rather than starting the legacy success/NEXT/TIPS/HUB chain.
+			presentationRevision += 1
+			baseTutorialRunning = false
+			clearExistingHighlights()
+			hideMessage()
+			currentPresentationStep = nil
+			return
+		end
+	end
 
 
 	if newSnapshot.Completed
@@ -2018,7 +2185,7 @@ local function applyServerSnapshot(
 		then
 
 			task.spawn(
-				runBaseTutorial
+				runLaunchFirstTutorial
 			)
 		end
 
@@ -2087,6 +2254,67 @@ OnboardingUpdated.OnClientEvent:Connect(
 -- =========================================================
 
 createOnboardingGui()
+
+
+-- Observe results independently of snapshot loading. These callbacks only
+-- collect UX state; contextual help can follow celebration on a later mission.
+FlightUIController.LaunchPressed:Connect(
+	function()
+		-- Consume control help only after it has actually been shown.
+		if earlyHelpShown then
+			earlyHelpDismissed = true
+			if currentPresentationStep == "RETRY_HINT" then
+				presentationRevision += 1
+				clearExistingHighlights()
+				hideMessage()
+				currentPresentationStep = nil
+			end
+		end
+
+		earlyLaunchPending = true
+		newSuccessfulResult = false
+
+		if serverSnapshot and serverSnapshot.Stage == 0 then
+			clearExistingHighlights()
+			hideMessage()
+			currentPresentationStep = nil
+		end
+	end
+)
+
+task.spawn(
+	function()
+		local resultGui = playerGui:WaitForChild("ResultGui")
+		local resultFrame = resultGui:WaitForChild("ResultFrame")
+		earlyResultFrame = resultFrame
+		local wasVisible = resultFrame.Visible
+
+		resultFrame:GetPropertyChangedSignal("Visible"):Connect(
+			function()
+				local visible = resultFrame.Visible
+				if visible and not wasVisible and earlyLaunchPending then
+					earlyFlightEnded = true
+					earlyLaunchPending = false
+					local nextButton = resultFrame:FindFirstChild("NextLevelButton")
+					newSuccessfulResult = nextButton ~= nil and nextButton.Visible == true
+					showMissionCelebration()
+					showFirstMissHelp()
+				elseif not visible then
+					newSuccessfulResult = false
+					-- Both NEXT MISSION and REPLAY close the existing Result UI.
+					-- Consume this one-shot lesson either way; never block either action.
+					if currentPresentationStep == "MISSION_CELEBRATION" then
+						presentationRevision += 1
+						clearExistingHighlights()
+						hideMessage()
+						currentPresentationStep = nil
+					end
+				end
+				wasVisible = visible
+			end
+		)
+	end
+)
 
 
 do
