@@ -301,6 +301,7 @@ local presentationRevision =
 local earlyLaunchPending = false
 local earlyFlightEnded = false
 local earlyHelpDismissed = false
+local earlyHelpShown = false
 local earlyResultFrame = nil
 local launchFirstSessionActive = false
 local newSuccessfulResult = false
@@ -1990,7 +1991,6 @@ local function showMissionCelebration()
 	-- ResultUI.Show sets this button visible only for Success + HasNextMission.
 	-- Invalidate the early loop before taking ownership of its panel/highlight.
 	celebrationShown = true
-	earlyHelpDismissed = true
 	presentationRevision += 1
 	baseTutorialRunning = false
 	currentPresentationStep = "MISSION_CELEBRATION"
@@ -2000,9 +2000,41 @@ local function showMissionCelebration()
 end
 
 
+local function showFirstMissHelp()
+
+	if not launchFirstSessionActive or earlyHelpShown or earlyHelpDismissed
+		or not earlyFlightEnded or earlyLaunchPending
+		or not earlyResultFrame or not earlyResultFrame.Visible
+	then
+		return
+	end
+
+	-- ResultUI.Show assigns TRY AGAIN only to an unsuccessful result,
+	-- and REPLAY to success, before making ResultFrame visible.
+	local retryButton = earlyResultFrame:FindFirstChild("TryAgainButton")
+	if not retryButton or not retryButton:IsA("TextButton")
+		or not retryButton.Visible or retryButton.Text ~= "TRY AGAIN"
+	then
+		return
+	end
+
+	earlyHelpShown = true
+	presentationRevision += 1
+	baseTutorialRunning = false
+	clearExistingHighlights()
+	currentPresentationStep = "RETRY_HINT"
+	showMessage(
+		"TRY ANOTHER THROW",
+		"ANGLE CHANGES THE PATH\nSPEED CHANGES HOW FAR YOU FLY",
+		false
+	)
+	messageFrame.Size = UDim2.fromOffset(MESSAGE_FRAME_WIDTH, 100)
+end
+
+
 local function runLaunchFirstTutorial()
 
-	if celebrationShown or baseTutorialRunning or not serverSnapshot or serverSnapshot.Stage ~= 0 then
+	if earlyFlightEnded or celebrationShown or baseTutorialRunning or not serverSnapshot or serverSnapshot.Stage ~= 0 then
 		return
 	end
 
@@ -2017,30 +2049,22 @@ local function runLaunchFirstTutorial()
 		local flightFrame = FlightUIController.GetFlightFrame()
 		local launchButton = FlightUIController.GetLaunchButton()
 		local ready = FlightUIController.IsInitialized() and flightFrame and launchButton
-		local canShow = ready and not earlyLaunchPending and not earlyHelpDismissed
-			and (flightFrame.Visible or (earlyFlightEnded and earlyResultFrame and earlyResultFrame.Visible))
+		local canShow = ready and not earlyLaunchPending and not earlyFlightEnded
+			and flightFrame.Visible
 
 		if canShow then
-			local step = earlyFlightEnded and "RETRY_HINT" or "LAUNCH_FIRST"
+			local step = "LAUNCH_FIRST"
 
 			if currentPresentationStep ~= step then
 				clearExistingHighlights()
 				currentPresentationStep = step
 
-				if earlyFlightEnded then
-					showMessage(
-						"TRY ANOTHER THROW",
-						"ANGLE CHANGES THE PATH\nSPEED CHANGES HOW FAR YOU FLY",
-						false
-					)
-				else
-					showMessage("LAUNCH YOUR PLANE", "", false)
-					highlightGuiObject(launchButton)
-				end
+				showMessage("LAUNCH YOUR PLANE", "", false)
+				highlightGuiObject(launchButton)
 
 				messageFrame.Size = UDim2.fromOffset(
 					MESSAGE_FRAME_WIDTH,
-					earlyFlightEnded and 100 or 48
+					48
 				)
 			end
 		elseif currentPresentationStep then
@@ -2106,7 +2130,8 @@ local function applyServerSnapshot(
 
 	if launchFirstSessionActive then
 		showMissionCelebration()
-		if celebrationShown then
+		showFirstMissHelp()
+		if celebrationShown or currentPresentationStep == "RETRY_HINT" then
 			return
 		end
 		if newSnapshot.Stage >= 1 then
@@ -2232,12 +2257,18 @@ createOnboardingGui()
 
 
 -- Observe results independently of snapshot loading. These callbacks only
--- collect UX state; the Stage 0 flow alone decides whether to show help.
+-- collect UX state; contextual help can follow celebration on a later mission.
 FlightUIController.LaunchPressed:Connect(
 	function()
-		-- The launch after the first result ends early help for this session.
-		if earlyFlightEnded then
+		-- Consume control help only after it has actually been shown.
+		if earlyHelpShown then
 			earlyHelpDismissed = true
+			if currentPresentationStep == "RETRY_HINT" then
+				presentationRevision += 1
+				clearExistingHighlights()
+				hideMessage()
+				currentPresentationStep = nil
+			end
 		end
 
 		earlyLaunchPending = true
@@ -2267,6 +2298,7 @@ task.spawn(
 					local nextButton = resultFrame:FindFirstChild("NextLevelButton")
 					newSuccessfulResult = nextButton ~= nil and nextButton.Visible == true
 					showMissionCelebration()
+					showFirstMissHelp()
 				elseif not visible then
 					newSuccessfulResult = false
 					-- Both NEXT MISSION and REPLAY close the existing Result UI.
