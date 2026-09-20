@@ -16,6 +16,9 @@ local FlightAttemptService =
 	)
 
 
+local AnalyticsService = require(script.Parent:WaitForChild("AnalyticsService"))
+
+
 local remotes =
 	ReplicatedStorage:WaitForChild(
 		"FlightAttemptRemotes"
@@ -80,6 +83,14 @@ beginAttempt.OnServerInvoke =
 				attemptError
 				or "ATTEMPT_REJECTED",
 		}
+	end
+
+
+	-- Both rejection paths are behind us. Capture acceptance before any yield.
+	local acceptedAt = DateTime.now().UnixTimestampMillis / 1000
+	local analyticsSucceeded = pcall(AnalyticsService.RegisterFTUEFirstLaunch, player, acceptedAt)
+	if not analyticsSucceeded then
+		warn("FlightAttemptServer: FTUE analytics notification failed")
 	end
 
 

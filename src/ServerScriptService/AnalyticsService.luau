@@ -167,6 +167,8 @@ local dirtyPlayers = {}
 local loadSignals = {}
 
 local ftueStartScheduled = {}
+local ftueStartFinished = {}
+local ftueFirstLaunch = {}
 
 local shuttingDown =
 	false
@@ -1241,7 +1243,7 @@ end
 
 -- Claims are committed before dispatch: no retry of an uncertain send.
 -- Only this path writes FTUE storage; ordinary saves preserve it verbatim.
-local function registerFTUEMilestone(player, milestone, value, metadata)
+local function registerFTUEMilestone(player, milestone, value, metadata, acceptedAt)
 
 	local function diagnostic(decision)
 		if RunService:IsStudio() then
@@ -1267,6 +1269,11 @@ local function registerFTUEMilestone(player, milestone, value, metadata)
 				return nil
 			end
 
+			-- A launch can only extend an already persisted cohort.
+			if acceptedAt and (type(previous) ~= "table" or previous.FTUE == nil) then
+				return nil
+			end
+
 			local record = previous and deepCopy(previous) or createStorageData(data)
 			local ftue = normalizeFTUE(record.FTUE)
 			if record.FTUE ~= nil and not ftue then
@@ -1287,6 +1294,21 @@ local function registerFTUEMilestone(player, milestone, value, metadata)
 
 			if ftue.DispatchClaims[milestone] then
 				return record
+			end
+
+			if acceptedAt then
+				if not ftue.Milestones.FTUE_Start or not ftue.DispatchClaims.FTUE_Start then
+					return nil
+				end
+				if ftue.Milestones.FTUE_FirstLaunch or record.FTUE.FirstLaunchAt ~= nil then
+					return record
+				end
+				if acceptedAt < ftue.StartedAt then
+					return nil
+				end
+
+				ftue.FirstLaunchAt = acceptedAt
+				ftue.TimeToFirstLaunchSeconds = acceptedAt - ftue.StartedAt
 			end
 
 			ftue.Milestones[milestone] = true
@@ -1321,6 +1343,41 @@ local function registerFTUEMilestone(player, milestone, value, metadata)
 	logRobloxCustomEvent(player, milestone, value, {
 		[CUSTOM_FIELD_1] = "FTUEVersion:1",
 	})
+
+	if acceptedAt then
+		-- One persisted launch claim owns both sends; neither is retried.
+		-- A crash between sends may lose the time event, never duplicate it.
+		if RunService:IsStudio() then
+			print("FTUE analytics:", "FTUE_TimeToFirstLaunch", "value",
+				ftue.TimeToFirstLaunchSeconds, "decision", "CLAIM_GRANTED_SHARED_FIRST_LAUNCH")
+		end
+		logRobloxCustomEvent(player, "FTUE_TimeToFirstLaunch", ftue.TimeToFirstLaunchSeconds, {
+			[CUSTOM_FIELD_1] = "FTUEVersion:1",
+		})
+	end
+end
+
+
+local function queueFirstLaunch(player)
+
+	local launch = ftueFirstLaunch[player]
+	if not launch or launch.Queued or player.Parent ~= Players then
+		return
+	end
+
+	local metadata = PlayerDataService.GetLoadMetadata(player)
+	if metadata and metadata.IsNewProfile and not ftueStartFinished[player] then
+		-- The start task will resume this pending launch, even on failure.
+		return
+	end
+
+	launch.Queued = true
+	task.defer(function()
+		local success = pcall(registerFTUEMilestone, player, "FTUE_FirstLaunch", 1, nil, launch.AcceptedAt)
+		if not success then
+			warn("AnalyticsService: FTUE first launch failed; gameplay unaffected")
+		end
+	end)
 end
 
 
@@ -1337,7 +1394,27 @@ local function scheduleFTUEStart(player)
 		if not success then
 			warn("AnalyticsService: FTUE initialization failed; gameplay unaffected")
 		end
+		if player.Parent == Players then
+			ftueStartFinished[player] = true
+			queueFirstLaunch(player)
+		end
 	end)
+end
+
+
+function AnalyticsService.RegisterFTUEFirstLaunch(player, acceptedAt)
+
+	-- Called synchronously at server acceptance; no yields or DataStore work.
+	if player.Parent ~= Players or ftueFirstLaunch[player]
+		or type(acceptedAt) ~= "number" or acceptedAt ~= acceptedAt
+		or acceptedAt <= 0 or acceptedAt == math.huge
+	then
+		return
+	end
+
+	ftueFirstLaunch[player] = { AcceptedAt = acceptedAt, Queued = false }
+	scheduleFTUEStart(player)
+	queueFirstLaunch(player)
 end
 
 
@@ -2004,6 +2081,8 @@ local function removePlayer(
 )
 
 	ftueStartScheduled[player] = nil
+	ftueStartFinished[player] = nil
+	ftueFirstLaunch[player] = nil
 
 	analyticsData[player] =
 		nil

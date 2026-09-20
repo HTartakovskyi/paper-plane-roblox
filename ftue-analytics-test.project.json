@@ -13,6 +13,10 @@
       "PlayerDataService": {
         "$path": "src/ServerScriptService/PlayerDataService.luau",
         "$ignoreUnknownInstances": true
+      },
+      "FlightAttemptServer": {
+        "$path": "src/ServerScriptService/FlightAttemptServer.server.luau",
+        "$ignoreUnknownInstances": true
       }
     }
   }
