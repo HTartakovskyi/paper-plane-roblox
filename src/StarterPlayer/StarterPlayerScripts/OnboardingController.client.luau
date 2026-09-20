@@ -2282,15 +2282,42 @@ FlightUIController.LaunchPressed:Connect(
 	end
 )
 
-task.spawn(
-	function()
-		local resultGui = playerGui:WaitForChild("ResultGui")
-		local resultFrame = resultGui:WaitForChild("ResultFrame")
-		earlyResultFrame = resultFrame
-		local wasVisible = resultFrame.Visible
+local function whenChildAvailable(parent, name, callback)
+	local finished = false
+	local connection
 
-		resultFrame:GetPropertyChangedSignal("Visible"):Connect(
-			function()
+	local function accept(child)
+		if finished or child.Name ~= name then
+			return
+		end
+		finished = true
+		if connection then
+			connection:Disconnect()
+			connection = nil
+		end
+		callback(child)
+	end
+
+	local child = parent:FindFirstChild(name)
+	if child then
+		accept(child)
+	else
+		connection = parent.ChildAdded:Connect(accept)
+		child = parent:FindFirstChild(name)
+		if child then
+			accept(child)
+		end
+	end
+end
+
+local function attachResultObserver(resultFrame)
+		if earlyResultFrame then
+			return
+		end
+		earlyResultFrame = resultFrame
+		local wasVisible = false
+
+		local function onResultVisibilityChanged()
 				local visible = resultFrame.Visible
 				if visible and not wasVisible and earlyLaunchPending then
 					earlyFlightEnded = true
@@ -2312,9 +2339,15 @@ task.spawn(
 				end
 				wasVisible = visible
 			end
-		)
-	end
-)
+
+		resultFrame:GetPropertyChangedSignal("Visible"):Connect(onResultVisibilityChanged)
+		-- A result may already be visible when its GUI arrives late.
+		onResultVisibilityChanged()
+end
+
+whenChildAvailable(playerGui, "ResultGui", function(resultGui)
+	whenChildAvailable(resultGui, "ResultFrame", attachResultObserver)
+end)
 
 
 do

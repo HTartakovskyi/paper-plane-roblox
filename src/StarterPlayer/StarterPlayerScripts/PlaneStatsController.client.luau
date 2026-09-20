@@ -61,16 +61,33 @@ local playerGui =
 	)
 
 
-local flightGui =
-	playerGui:WaitForChild(
-		"FlightGui"
-	)
+local function whenChildAvailable(parent, name, callback)
+	local finished = false
+	local connection
 
+	local function accept(child)
+		if finished or child.Name ~= name then
+			return
+		end
+		finished = true
+		if connection then
+			connection:Disconnect()
+			connection = nil
+		end
+		callback(child)
+	end
 
-local flightFrame =
-	flightGui:WaitForChild(
-		"FlightFrame"
-	)
+	local child = parent:FindFirstChild(name)
+	if child then
+		accept(child)
+	else
+		connection = parent.ChildAdded:Connect(accept)
+		child = parent:FindFirstChild(name)
+		if child then
+			accept(child)
+		end
+	end
+end
 
 
 -- =========================================================
@@ -220,6 +237,14 @@ local LINK_COLOR =
 -- =========================================================
 -- CLEAN OLD OBJECTS
 -- =========================================================
+
+local statsInitializationStarted = false
+
+local function initializeStats(flightFrame)
+	if statsInitializationStarted then
+		return
+	end
+	statsInitializationStarted = true
 
 local oldGui =
 	playerGui:FindFirstChild(
@@ -1828,3 +1853,8 @@ statsLink.Visible =
 print(
 	"PlaneStatsController started"
 )
+end
+
+whenChildAvailable(playerGui, "FlightGui", function(flightGui)
+	whenChildAvailable(flightGui, "FlightFrame", initializeStats)
+end)
