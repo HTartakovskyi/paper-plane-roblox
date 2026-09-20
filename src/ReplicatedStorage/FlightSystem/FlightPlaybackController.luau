@@ -73,6 +73,8 @@ local FlightCameraController =
 local PHYSICS_MAX_TIME =
 	4
 
+local MAX_FLIGHT_DISTANCE_MULTIPLIER = 1.5
+
 
 local PHYSICS_SETTLE_SPEED =
 	0.25
@@ -89,7 +91,8 @@ local PHYSICS_SETTLE_TIME =
 local function waitForVisualPhysics(
 	plane,
 	trajectory,
-	flightForward
+	flightForward,
+	distanceLimitExceeded
 )
 
 	local startTime =
@@ -127,6 +130,21 @@ local function waitForVisualPhysics(
 			PlaneController.GetPosition(
 				plane
 			)
+
+		if distanceLimitExceeded(currentPosition) then
+			TrajectoryRenderer.AddPoint(trajectory, currentPosition)
+			-- Stop client-only post-impact motion at the position shown to the player.
+			local parts = plane:GetDescendants()
+			table.insert(parts, plane)
+			for _, part in ipairs(parts) do
+				if part:IsA("BasePart") then
+					part.AssemblyLinearVelocity = Vector3.zero
+					part.AssemblyAngularVelocity = Vector3.zero
+					part.Anchored = true
+				end
+			end
+			return true
+		end
 
 
 		local velocity =
@@ -253,6 +271,28 @@ function FlightPlaybackController.Play(
 	-- TRAJECTORY
 	-- =====================================================
 
+	local startPosition = points[1]
+	local maxHorizontalDistance
+	local targetPosition = config.DistanceLimitTargetPosition
+	if typeof(targetPosition) == "Vector3" then
+		local offset = targetPosition - startPosition
+		local distance = Vector3.new(offset.X, 0, offset.Z).Magnitude
+		if distance > 0.001 and distance < math.huge then
+			maxHorizontalDistance = distance * MAX_FLIGHT_DISTANCE_MULTIPLIER
+		end
+	end
+
+	local function distanceLimitExceeded(position)
+		if not maxHorizontalDistance or not position then
+			return false
+		end
+		local offset = position - startPosition
+		return Vector3.new(offset.X, 0, offset.Z).Magnitude > maxHorizontalDistance
+	end
+
+	local distanceLimitReached = false
+	local playbackFinished = false
+
 	local trajectory =
 		TrajectoryRenderer.Create()
 
@@ -314,7 +354,7 @@ function FlightPlaybackController.Play(
 		task.spawn(
 			function()
 
-				while throwTrack.IsPlaying do
+				while throwTrack.IsPlaying and not playbackFinished do
 
 					RunService.Heartbeat:Wait()
 				end
@@ -399,6 +439,13 @@ function FlightPlaybackController.Play(
 				movementDirection
 			)
 
+			local displayedPosition = PlaneController.GetPosition(plane)
+			if distanceLimitExceeded(displayedPosition) then
+				distanceLimitReached = true
+				TrajectoryRenderer.AddPoint(trajectory, displayedPosition)
+				break
+			end
+
 
 			if flightCameraActive then
 
@@ -424,6 +471,10 @@ function FlightPlaybackController.Play(
 		end
 
 
+		if distanceLimitReached then
+			break
+		end
+
 		if index
 			% FlightConfig.TrailPointInterval
 			== 0
@@ -442,7 +493,7 @@ function FlightPlaybackController.Play(
 	-- SERVER IMPACT -> VISUAL ROBLOX PHYSICS
 	-- =====================================================
 
-	if impact
+	if not distanceLimitReached and impact
 		and impact.Velocity
 	then
 
@@ -452,12 +503,18 @@ function FlightPlaybackController.Play(
 		)
 
 
-		waitForVisualPhysics(
+		distanceLimitReached = waitForVisualPhysics(
 			plane,
 			trajectory,
-			flightForward
-		)
+			flightForward,
+			distanceLimitExceeded
+		) == true
+	elseif distanceLimitReached then
+		-- The server impact lies on the omitted part of the visual trajectory.
+		impact = nil
 	end
+
+	playbackFinished = true
 
 
 	-- =====================================================
@@ -472,6 +529,7 @@ function FlightPlaybackController.Play(
 
 
 	return {
+		DistanceLimitReached = distanceLimitReached,
 
 		LandingPosition =
 			finalPosition,

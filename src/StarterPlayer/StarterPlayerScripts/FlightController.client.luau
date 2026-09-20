@@ -146,6 +146,8 @@ local ThrowController =
 	)
 
 
+local ThrowMath = require(FlightSystem:WaitForChild("ThrowMath"))
+
 local FlightPlaybackController =
 	require(
 		FlightSystem:WaitForChild(
@@ -1090,6 +1092,13 @@ local function playResultCamera(
 	flightResult,
 	trajectoryPoints
 )
+	if flightResult.DistanceLimitReached then
+		FlightCameraController.PlayLandingCamera(
+			flightResult.LandingPosition,
+			flightResult.FlightForward
+		)
+		return
+	end
 
 	if currentLevelConfig.MissionType
 		== "Ring"
@@ -1421,8 +1430,22 @@ local function startThrow()
 	end
 
 
+	local playbackTargetPosition
+	-- Resolution starts server physics at the prepared impact after playback.
+	-- Do not advance that handoff by truncating an unresolved Knockdown attempt.
+	if not serverAttempt.RequiresKnockdownResolution then
+		-- Missing target configuration disables pacing, never the flight itself.
+		local targetAvailable, targetPosition = pcall(function()
+			return ThrowMath.GetTargetPosition(currentLevelConfig) + serverAttempt.WorldOffset
+		end)
+		if targetAvailable and typeof(targetPosition) == "Vector3" then
+			playbackTargetPosition = targetPosition
+		end
+	end
+
 	local flightResult =
 		FlightPlaybackController.Play({
+			DistanceLimitTargetPosition = playbackTargetPosition,
 
 			Plane =
 			plane,

@@ -1,0 +1,31 @@
+{
+  "name": "PaperPlane-Flight-Playback-Test",
+  "tree": {
+    "$className": "DataModel",
+    "$ignoreUnknownInstances": true,
+    "ReplicatedStorage": {
+      "$className": "ReplicatedStorage",
+      "$ignoreUnknownInstances": true,
+      "FlightSystem": {
+        "$className": "Folder",
+        "$ignoreUnknownInstances": true,
+        "FlightPlaybackController": {
+          "$path": "src/ReplicatedStorage/FlightSystem/FlightPlaybackController.luau",
+          "$ignoreUnknownInstances": true
+        }
+      }
+    },
+    "StarterPlayer": {
+      "$className": "StarterPlayer",
+      "$ignoreUnknownInstances": true,
+      "StarterPlayerScripts": {
+        "$className": "StarterPlayerScripts",
+        "$ignoreUnknownInstances": true,
+        "FlightController": {
+          "$path": "src/StarterPlayer/StarterPlayerScripts/FlightController.client.luau",
+          "$ignoreUnknownInstances": true
+        }
+      }
+    }
+  }
+}
