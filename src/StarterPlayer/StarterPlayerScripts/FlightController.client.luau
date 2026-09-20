@@ -1092,13 +1092,6 @@ local function playResultCamera(
 	flightResult,
 	trajectoryPoints
 )
-	if flightResult.DistanceLimitReached then
-		FlightCameraController.PlayLandingCamera(
-			flightResult.LandingPosition,
-			flightResult.FlightForward
-		)
-		return
-	end
 
 	if currentLevelConfig.MissionType
 		== "Ring"
