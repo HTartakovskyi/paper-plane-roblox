@@ -271,7 +271,7 @@ LevelConfig.Levels = {
 
 			Position =
 				Vector3.new(
-					90,
+					80,
 					0.2,
 					0
 				),
@@ -360,7 +360,7 @@ LevelConfig.Levels = {
 
 			Position =
 				Vector3.new(
-					90,
+					100,
 					0.2,
 					0
 				),

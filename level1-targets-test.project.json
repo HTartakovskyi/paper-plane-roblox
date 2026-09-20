@@ -1,0 +1,19 @@
+{
+  "name": "PaperPlane-Level1-Targets-Test",
+  "tree": {
+    "$className": "DataModel",
+    "$ignoreUnknownInstances": true,
+    "ReplicatedStorage": {
+      "$className": "ReplicatedStorage",
+      "$ignoreUnknownInstances": true,
+      "LevelSystem": {
+        "$className": "Folder",
+        "$ignoreUnknownInstances": true,
+        "LevelConfig": {
+          "$path": "src/ReplicatedStorage/LevelSystem/LevelConfig.luau",
+          "$ignoreUnknownInstances": true
+        }
+      }
+    }
+  }
+}
