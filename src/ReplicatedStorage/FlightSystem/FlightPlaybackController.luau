@@ -88,6 +88,12 @@ local PHYSICS_SETTLE_TIME =
 -- WAIT FOR VISUAL PHYSICS
 -- =========================================================
 
+local function hasLivePlaneParts(plane)
+	return plane ~= nil
+		and plane:IsDescendantOf(workspace)
+		and (plane:IsA("BasePart") or plane:FindFirstChildWhichIsA("BasePart", true) ~= nil)
+end
+
 local function waitForVisualPhysics(
 	plane,
 	trajectory,
@@ -107,10 +113,15 @@ local function waitForVisualPhysics(
 		0
 
 
+	if not hasLivePlaneParts(plane) then
+		return false, nil
+	end
+
 	local lastPosition =
 		PlaneController.GetPosition(
 			plane
 		)
+	local lastValidPosition = lastPosition
 
 
 	while plane
@@ -120,6 +131,10 @@ local function waitForVisualPhysics(
 		local dt =
 			RunService.Heartbeat:Wait()
 
+		-- The model or its parts may have been removed during Heartbeat.
+		if not hasLivePlaneParts(plane) then
+			break
+		end
 
 		local elapsed =
 			time()
@@ -130,6 +145,7 @@ local function waitForVisualPhysics(
 			PlaneController.GetPosition(
 				plane
 			)
+		lastValidPosition = currentPosition
 
 		if distanceLimitExceeded(currentPosition) then
 			TrajectoryRenderer.AddPoint(trajectory, currentPosition)
@@ -143,7 +159,7 @@ local function waitForVisualPhysics(
 					part.Anchored = true
 				end
 			end
-			return true
+			return true, lastValidPosition
 		end
 
 
@@ -212,6 +228,7 @@ local function waitForVisualPhysics(
 			break
 		end
 	end
+	return false, lastValidPosition
 end
 
 
@@ -493,6 +510,7 @@ function FlightPlaybackController.Play(
 	-- SERVER IMPACT -> VISUAL ROBLOX PHYSICS
 	-- =====================================================
 
+	local lastPhysicsPosition
 	if not distanceLimitReached and impact
 		and impact.Velocity
 	then
@@ -503,12 +521,12 @@ function FlightPlaybackController.Play(
 		)
 
 
-		distanceLimitReached = waitForVisualPhysics(
+		distanceLimitReached, lastPhysicsPosition = waitForVisualPhysics(
 			plane,
 			trajectory,
 			flightForward,
 			distanceLimitExceeded
-		) == true
+		)
 	elseif distanceLimitReached then
 		-- The server impact lies on the omitted part of the visual trajectory.
 		impact = nil
@@ -522,9 +540,10 @@ function FlightPlaybackController.Play(
 	-- =====================================================
 
 	local finalPosition =
-		PlaneController.GetPosition(
+		(hasLivePlaneParts(plane) and PlaneController.GetPosition(
 			plane
-		)
+		))
+		or lastPhysicsPosition
 		or points[#points]
 
 
