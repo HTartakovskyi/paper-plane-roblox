@@ -3392,6 +3392,56 @@ end
 -- REFRESH
 -- =========================================================
 
+local walletRewardTweens = {}
+local walletRewardCompleted
+local walletRewardScale
+local walletRewardBaseColor
+local walletRewardBaseScale
+local walletRewardRevision = 0
+
+local function clearWalletRewardFeedback()
+	walletRewardRevision += 1
+	if walletRewardCompleted then
+		walletRewardCompleted:Disconnect()
+		walletRewardCompleted = nil
+	end
+	for _, tween in ipairs(walletRewardTweens) do
+		tween:Cancel()
+	end
+	table.clear(walletRewardTweens)
+	if walletRewardBaseColor and walletLabel then
+		walletLabel.TextColor3 = walletRewardBaseColor
+		walletRewardScale.Scale = walletRewardBaseScale
+	end
+end
+
+function ProgressUIController.PlayRewardFeedback()
+	if not initialized or not walletLabel or not walletLabel.Parent then
+		return
+	end
+	clearWalletRewardFeedback()
+	if not walletRewardScale then
+		walletRewardScale = Instance.new("UIScale")
+		walletRewardScale.Name = "RewardFeedbackScale"
+		walletRewardScale.Parent = walletLabel
+	end
+	walletRewardBaseColor = walletLabel.TextColor3
+	walletRewardBaseScale = walletRewardScale.Scale
+	local info = TweenInfo.new(0.4, Enum.EasingStyle.Quad, Enum.EasingDirection.Out, 0, true)
+	local color = TweenService:Create(walletLabel, info, { TextColor3 = Color3.fromRGB(255, 215, 95) })
+	local scale = TweenService:Create(walletRewardScale, info, { Scale = walletRewardBaseScale * 1.08 })
+	walletRewardTweens = { color, scale }
+	local revision = walletRewardRevision
+	walletRewardCompleted = color.Completed:Connect(function()
+		if revision == walletRewardRevision then
+			clearWalletRewardFeedback()
+		end
+	end)
+	scale:Play()
+	color:Play()
+end
+
+
 function ProgressUIController.Refresh()
 
 	if not initialized then

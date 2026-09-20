@@ -1674,6 +1674,10 @@ local function startThrow()
 			and
 			ProgressionController.HasNextLevel(),
 	})
+
+	if economyResult and economyResult.RewardCoins > 0 then
+		ProgressUIController.PlayRewardFeedback()
+	end
 end
 
 

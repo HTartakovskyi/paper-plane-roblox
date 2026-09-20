@@ -23,6 +23,8 @@ local Players =
 
 local ResultUIController = {}
 
+local TweenService = game:GetService("TweenService")
+
 
 -- =========================================================
 -- STATE
@@ -57,6 +59,59 @@ local speedLabel
 local tryAgainButton
 
 local nextLevelButton
+
+local rewardLabel
+local rewardScale
+local rewardTweens = {}
+local rewardCompleted
+local rewardRevision = 0
+
+local function clearRewardFeedback()
+	rewardRevision += 1
+	if rewardCompleted then
+		rewardCompleted:Disconnect()
+		rewardCompleted = nil
+	end
+	for _, tween in ipairs(rewardTweens) do
+		tween:Cancel()
+	end
+	table.clear(rewardTweens)
+	if rewardLabel then
+		rewardLabel.Visible = false
+		rewardLabel.TextTransparency = 0
+		rewardScale.Scale = 1
+	end
+end
+
+local function playRewardFeedback(coins)
+	clearRewardFeedback()
+	if type(coins) ~= "number" or not (coins > 0) then
+		return
+	end
+	rewardLabel.Text = "+" .. tostring(coins) .. " COINS"
+	rewardLabel.Visible = true
+	rewardLabel.TextTransparency = 1
+	rewardScale.Scale = 0.85
+	local appearInfo = TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+	local fadeInfo = TweenInfo.new(0.55, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+	local appear = TweenService:Create(rewardLabel, appearInfo, { TextTransparency = 0 })
+	local scale = TweenService:Create(rewardScale, appearInfo, { Scale = 1 })
+	local fade = TweenService:Create(rewardLabel, fadeInfo, { TextTransparency = 1 })
+	rewardTweens = { appear, scale, fade }
+	local revision = rewardRevision
+	rewardCompleted = fade.Completed:Connect(function()
+		if revision == rewardRevision then
+			clearRewardFeedback()
+		end
+	end)
+	scale:Play()
+	appear:Play()
+	task.delay(0.25 + 0.7, function()
+		if revision == rewardRevision then
+			fade:Play()
+		end
+	end)
+end
 
 
 -- =========================================================
@@ -189,6 +244,27 @@ function ResultUIController.Initialize(
 	-- TRY AGAIN / REPLAY
 	-- =====================================================
 
+	rewardLabel = Instance.new("TextLabel")
+	rewardLabel.Name = "RewardFeedback"
+	rewardLabel.BackgroundTransparency = 1
+	rewardLabel.AnchorPoint = Vector2.new(0.5, 1)
+	rewardLabel.Position = UDim2.new(0.5, 0, 0, -6)
+	rewardLabel.Size = UDim2.fromOffset(220, 26)
+	rewardLabel.Font = Enum.Font.GothamBold
+	rewardLabel.TextSize = 22
+	rewardLabel.TextColor3 = Color3.fromRGB(255, 215, 95)
+	rewardLabel.ZIndex = distanceLabel.ZIndex + 1
+	rewardLabel.Active = false
+	rewardLabel.Visible = false
+	rewardLabel.Parent = distanceLabel
+	rewardScale = Instance.new("UIScale")
+	rewardScale.Parent = rewardLabel
+	resultFrame:GetPropertyChangedSignal("Visible"):Connect(function()
+		if not resultFrame.Visible then
+			clearRewardFeedback()
+		end
+	end)
+
 	tryAgainButton.MouseButton1Click:Connect(
 		function()
 
@@ -290,6 +366,8 @@ function ResultUIController.Show(
 	data =
 		data
 		or {}
+
+	clearRewardFeedback()
 
 
 	-- =====================================================
@@ -545,6 +623,8 @@ function ResultUIController.Show(
 
 	resultFrame.Visible =
 		true
+
+	playRewardFeedback(data.RewardCoins)
 end
 
 
@@ -553,6 +633,7 @@ end
 -- =========================================================
 
 function ResultUIController.Hide()
+	clearRewardFeedback()
 
 	if not initialized then
 

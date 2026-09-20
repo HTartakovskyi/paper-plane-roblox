@@ -1,0 +1,39 @@
+{
+  "name": "PaperPlane-Reward-Feedback-Test",
+  "tree": {
+    "$className": "DataModel",
+    "$ignoreUnknownInstances": true,
+    "ReplicatedStorage": {
+      "$className": "ReplicatedStorage",
+      "$ignoreUnknownInstances": true,
+      "FlightSystem": {
+        "$className": "Folder",
+        "$ignoreUnknownInstances": true,
+        "ResultUIController": {
+          "$path": "src/ReplicatedStorage/FlightSystem/ResultUIController.luau",
+          "$ignoreUnknownInstances": true
+        }
+      },
+      "LevelSystem": {
+        "$className": "Folder",
+        "$ignoreUnknownInstances": true,
+        "ProgressUIController": {
+          "$path": "src/ReplicatedStorage/LevelSystem/ProgressUIController.luau",
+          "$ignoreUnknownInstances": true
+        }
+      }
+    },
+    "StarterPlayer": {
+      "$className": "StarterPlayer",
+      "$ignoreUnknownInstances": true,
+      "StarterPlayerScripts": {
+        "$className": "StarterPlayerScripts",
+        "$ignoreUnknownInstances": true,
+        "FlightController": {
+          "$path": "src/StarterPlayer/StarterPlayerScripts/FlightController.client.luau",
+          "$ignoreUnknownInstances": true
+        }
+      }
+    }
+  }
+}
